@@ -440,7 +440,7 @@ type
 
     // Arguments that the command handler should be
     // invoked with.
-    arguments: string;
+    arguments: Variant;
   end;
 
   TLSPDocumentFilter = record
@@ -1179,7 +1179,7 @@ type
     description: string;
   end;
 
-  TLSPEditChanges = record
+  TLSPEditChanges = class
     uri: TLSPDocumentUri;
     values: TArray<TLSPTextEdit>;
   end;
@@ -1194,7 +1194,7 @@ type
   TLSPWorkspaceEdit = class(TLSPBaseParams)
   public
     // Holds changes to existing resources.
-    changes: TLSPEditChanges;
+    changes: TObjectList<TLSPEditChanges>;
     (* changes?: { [uri: DocumentUri]: TextEdit[]; }; *)
 
     // Depending on the client capability
@@ -1226,6 +1226,8 @@ type
     // @since 3.16.0
     //
     changeAnnotations: TLSPEditChangeAnnotations;
+    constructor Create;
+    destructor Destroy; override;
     (*
       {
         [id: string /* ChangeAnnotationIdentifier */]: ChangeAnnotation;
@@ -2833,7 +2835,7 @@ type
     command: string;
 
     // Arguments that the command should be invoked with.
-    arguments: string;
+    arguments: Variant;
   end;
 
   TLSPApplyWorkspaceEditParams = class(TLSPBaseParams)
@@ -3520,6 +3522,29 @@ type
     location: TLSPLocation;
     locations: TArray<TLSPLocation>;
     locationLinks: TArray<TLSPLocationLink>;
+  end;
+
+  TLSPReferenceContext = record
+  public
+    // Include the declaration of the current symbol.
+    includeDeclaration: boolean;
+  end;
+
+  TLSPReferencesParams = class(TLSPTextDocumentPositionParams)
+  public
+    context: TLSPReferenceContext;
+
+    // An optional token that a server can use to report partial results (e.g.
+	  // streaming) to the client.
+	  partialResultToken: TLSPProgressToken;
+
+    // An optional token that a server can use to report work done progress.
+    workDoneToken: TLSPProgressToken;
+  end;
+
+  TLSPFindReferencesResponse = class(TLSPBaseParams)
+  public
+    locations: TArray<TLSPLocation>;
   end;
 
   TLSPDocumentHighlightParams = class(TLSPTextDocumentPositionParams)
@@ -5718,6 +5743,18 @@ begin
   FreeAndNil(willRename);
   FreeAndNil(didDelete);
   FreeAndNil(willDelete);
+  inherited;
+end;
+
+constructor TLSPWorkspaceEdit.Create;
+begin
+  inherited;
+  changes := TObjectList<TLSPEditChanges>.Create;
+end;
+
+destructor TLSPWorkspaceEdit.Destroy;
+begin
+  FreeAndNil(changes);
   inherited;
 end;
 

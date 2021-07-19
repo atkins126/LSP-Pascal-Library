@@ -56,6 +56,8 @@ function JsonDocumentLinkResponseToObject(const LJson: ISuperObject; var ErrorCo
     path: string = ''): TLSPDocumentLinkResponse;
 function JsonDocumentLinkResolveToObject(const LJson: ISuperObject; var ErrorCode: Integer; var ErrorMessage: string): TLSPDocumentLink;
 function JsonExecuteCommandResult(const LJson: ISuperObject; var ErrorCode: Integer; var ErrorMessage: string): string;
+function JsonFindReferencesResponseToObject(const LJson: ISuperObject; var ErrorCode: Integer; var ErrorMessage: string;
+    const path: string = ''): TLSPFindReferencesResponse;
 function JsonFoldingRangeResponseToObject(const LJson: ISuperObject; var ErrorCode: Integer; var ErrorMessage: string; const
     path: string = ''): TLSPFoldingRangeResponse;
 function JsonGotoResponseToObject(const LJson: ISuperObject; var ErrorCode: Integer;
@@ -264,6 +266,18 @@ begin
 
   LJson := TSuperObject.Create(Result);
   LJson.Raw['data'] := item.data;
+
+  Result := LJson.AsJSON;
+end;
+
+function LSPExecuteCommandParamsToJSON(const item: TLSPExecuteCommandParams): string;
+var
+  LJson: ISuperObject;
+begin
+  Result := item.AsJSON;
+
+  LJson := TSuperObject.Create(Result);
+  LJson.Raw['arguments'] := item.arguments;
 
   Result := LJson.AsJSON;
 end;
@@ -535,7 +549,9 @@ var
   i,j,k: Integer;
   params: TLSPTextDocumentEdit;
   edit: TLSPAnnotatedTextEdit;
+  LEdit: TLSPTextEdit;
   LAction: TLSPCodeAction;
+  LChange: TLSPEditChanges;
 begin
   Result := TLSPCodeActionResponse.Create;
   ErrorCode := 0;
@@ -566,12 +582,13 @@ begin
     LArrayO := LMember.AsObject;
 
     LAction := TLSPCodeAction.Create;
-    if (LArrayO.S['command'] <> '') then
+    if LArrayO.Expression['command'].DataType = dtString then
     begin
       // TLSPCommand
       LAction.command.title := LArrayO.S['title'];
       LAction.command.command := LArrayO.S['command'];
-      LAction.command.arguments := LArrayO.S['arguments'];
+      if LArrayO.Expression['arguments'].DataType = dtArray then
+        LAction.command.arguments := LArrayO.A['arguments'].AsJSON;
     end
     else
     begin
@@ -653,12 +670,13 @@ begin
       // Workspace edit Changes
       if (LArrayO.Expression['edit'].DataType = dtObject) and (LArrayO.O['edit'].Expression['changes'].DataType = dtObject) then
       begin
-        LAction.edit.changes.uri := LArrayO.O['edit'].O['changes'].S['uri'];
+        LChange := TLSPEditChanges.Create;
+        LChange.uri := LArrayO.O['edit'].O['changes'].S['uri'];
 
         if (LArrayO.O['edit'].O['changes'].Expression['values'].DataType = dtArray) then
         begin
           LArr := LArrayO.O['edit'].O['changes'].A['values'];
-          SetLength(LAction.edit.changes.values, LArr.Length);
+          SetLength(LChange.values, LArr.Length);
           j := 0;
           for LMember1 in LArr do
           begin
@@ -666,17 +684,20 @@ begin
             if LArrO.Expression['range'].DataType = dtObject then
             begin
               LRange := LArrO.O['range'];
-              LAction.edit.changes.values[j].newText := LArrO.S['newText'];
-              LAction.edit.changes.values[j].range.startPos.line := LRange.O['start'].I['line'];
-              LAction.edit.changes.values[j].range.startPos.character := LRange.O['start'].I['character'];
-              LAction.edit.changes.values[j].range.endPos.line := LRange.O['end'].I['line'];
-              LAction.edit.changes.values[j].range.endPos.character := LRange.O['end'].I['character'];
+              LEdit := TLSPTextEdit.Create;
+              LEdit.newText := LArrO.S['newText'];
+              LEdit.range.startPos.line := LRange.O['start'].I['line'];
+              LEdit.range.startPos.character := LRange.O['start'].I['character'];
+              LEdit.range.endPos.line := LRange.O['end'].I['line'];
+              LEdit.range.endPos.character := LRange.O['end'].I['character'];
+              LChange.values[j] := LEdit;
               Inc(j);
             end;
           end;
-          if j <> Length(LAction.edit.changes.values) then
-            SetLength(LAction.edit.changes.values, j);
+          if j <> Length(LChange.values) then
+            SetLength(LChange.values, j);
         end;
+        LAction.edit.changes.Add(LChange);
       end;
 
       // Workspace edit document changes
@@ -762,7 +783,8 @@ begin
     begin
       LAction.command.title := LArrayO.O['command'].S['title'];
       LAction.command.command := LArrayO.O['command'].S['command'];
-      LAction.command.arguments := LArrayO.O['command'].S['arguments'];
+      if LArrayO.O['command'].Expression['arguments'].DataType = dtArray then
+        LAction.command.arguments := LArrayO.O['command'].A['arguments'].AsJSON;
     end;
 
     // Data (any)
@@ -793,6 +815,8 @@ var
   j,k: Integer;
   params: TLSPTextDocumentEdit;
   edit: TLSPAnnotatedTextEdit;
+  LEdit: TLSPTextEdit;
+  LChange: TLSPEditChanges;
 begin
   Result := TLSPCodeAction.Create;
   ErrorCode := 0;
@@ -901,29 +925,33 @@ begin
   // Workspace edit Changes
   if (LJsonResult.Expression['edit'].DataType = dtObject) and (LJsonResult.O['edit'].Expression['changes'].DataType = dtObject) then
   begin
-    Result.edit.changes.uri := LJsonResult.O['edit'].O['changes'].S['uri'];
+    LChange := TLSPEditChanges.Create;
+    LChange.uri := LJsonResult.O['edit'].O['changes'].S['uri'];
     if LJsonResult.O['edit'].O['changes'].Expression['values'].DataType = dtObject then
     begin
       LArr := LJsonResult.O['edit'].O['changes'].A['values'];
-      SetLength(Result.edit.changes.values, LArr.Length);
+      SetLength(LChange.values, LArr.Length);
       j := 0;
       for LMem in LArr do
       begin
         if LMem.DataType <> dtObject then Continue;
         LArrO := LMem.AsObject;
 
-        Result.edit.changes.values[j].newText := LArrO.S['newText'];
         if LArrO.Expression['range'].DataType = dtObject then
         begin
           LRange := LArrO.O['range'];
-          Result.edit.changes.values[j].range.startPos.line := LRange.O['start'].I['line'];
-          Result.edit.changes.values[j].range.startPos.character := LRange.O['start'].I['character'];
-          Result.edit.changes.values[j].range.endPos.line := LRange.O['end'].I['line'];
-          Result.edit.changes.values[j].range.endPos.character := LRange.O['end'].I['character'];
+          LEdit := TLSPTextEdit.Create;
+          LEdit.newText := LArrO.S['newText'];
+          LEdit.range.startPos.line := LRange.O['start'].I['line'];
+          LEdit.range.startPos.character := LRange.O['start'].I['character'];
+          LEdit.range.endPos.line := LRange.O['end'].I['line'];
+          LEdit.range.endPos.character := LRange.O['end'].I['character'];
+          LChange.values[j] := LEdit;
         end;
         Inc(j);
       end;
     end;
+    Result.edit.changes.Add(LChange);
   end;
 
   // Workspace edit document changes
@@ -1005,7 +1033,8 @@ begin
   begin
     Result.command.title := LJsonResult.O['command'].S['title'];
     Result.command.command := LJsonResult.O['command'].S['command'];
-    Result.command.arguments := LJsonResult.O['command'].S['arguments'];
+    if LJsonResult.O['command'].Expression['arguments'].DataType = dtArray then
+      Result.command.arguments := LJsonResult.O['command'].A['arguments'].AsJSON;
   end;
 
   // Data (any)
@@ -1023,7 +1052,7 @@ end;
 function JsonCodeLensToObject(const LJson: ISuperObject; var ErrorCode: Integer; var ErrorMessage: string):
     TLSPCodeLensResponse;
 var
-  LArray: ISuperArray;
+  LArray,LArr2: ISuperArray;
   LRange: ISuperObject;
   LArrayO: ISuperObject;
   LMember: IMember;
@@ -1071,7 +1100,8 @@ begin
     begin
       lens.command.title := LArrayO.O['command'].S['title'];
       lens.command.command := LArrayO.O['command'].S['command'];
-      lens.command.arguments := LArrayO.O['command'].S['arguments'];
+      if LArrayO.O['command'].Expression['arguments'].DataType = dtArray then
+        lens.command.arguments := LArrayO.O['command'].A['arguments'].AsJSON;
     end;
 
     // Data
@@ -1127,7 +1157,8 @@ begin
   begin
     Result.command.title := LJsonResult.O['command'].S['title'];
     Result.command.command := LJsonResult.O['command'].S['command'];
-    Result.command.arguments := LJsonResult.O['command'].S['arguments'];
+    if LJsonResult.O['command'].Expression['arguments'].DataType = dtArray then
+      Result.command.arguments := LJsonResult.O['command'].A['arguments'].AsJSON;
   end;
 
   // Data
@@ -1358,7 +1389,8 @@ var
       begin
         item.command.title := LArrObj.O['command'].S['title'];
         item.command.command := LArrObj.O['command'].S['command'];
-        item.command.arguments := LArrObj.O['command'].S['arguments'];
+        if LArrObj.O['command'].Expression['arguments'].DataType = dtArray then
+          item.command.arguments := LArrObj.O['command'].A['arguments'].AsJSON;
       end;
 
       // Data (any JSON data that is preserved on a completion item between a completion and a completion resolve request.)
@@ -1561,7 +1593,8 @@ begin
   begin
     Result.command.title := LObject.O['command'].S['title'];
     Result.command.command := LObject.O['command'].S['command'];
-    Result.command.arguments := LObject.O['command'].S['arguments'];
+    if LObject.O['command'].Expression['arguments'].DataType = dtArray then
+      Result.command.arguments := LObject.O['command'].A['arguments'].AsJSON;
   end;
 
   // Data (any JSON data that is preserved on a completion Result between a completion and a completion resolve request.)
@@ -1677,6 +1710,7 @@ var
   LArrayObj: ISuperObject;
   LMember: IMember;
   LRange: ISuperObject;
+  LEdit: TLSPTextEdit;
   s: string;
   i: Integer;
 begin
@@ -1702,15 +1736,17 @@ begin
   begin
     if LMember.DataType <> dtObject then Continue;
     LArrayObj := LMember.AsObject;
-    Result.edits[i].newText := LArrayObj.S['newText'];
+    LEdit := TLSPTextEdit.Create;
+    LEdit.newText := LArrayObj.S['newText'];
     if LArrayObj.Expression['range'].DataType = dtObject then
     begin
       LRange := LArrayObj.O['range'];
-      Result.edits[i].range.startPos.line := LRange.O['start'].I['line'];
-      Result.edits[i].range.startPos.character := LRange.O['start'].I['character'];
-      Result.edits[i].range.endPos.line := LRange.O['end'].I['line'];
-      Result.edits[i].range.endPos.character := LRange.O['end'].I['character'];
+      LEdit.range.startPos.line := LRange.O['start'].I['line'];
+      LEdit.range.startPos.character := LRange.O['start'].I['character'];
+      LEdit.range.endPos.line := LRange.O['end'].I['line'];
+      LEdit.range.endPos.character := LRange.O['end'].I['character'];
     end;
+    Result.edits[i] := LEdit;
     Inc(i);
   end;
   if i <> Length(Result.edits) then
@@ -1891,6 +1927,7 @@ begin
   end;
 
   if LJson[s].DataType <> dtArray then Exit;
+  LArray := LJson[s].AsArray;
 
   bDocumentSymbols := False;
   for LMember in LArray do
@@ -1899,7 +1936,6 @@ begin
     Break;
   end;
 
-  LArray := LJson[s].AsArray;
   if (LArray.Length > 0) then
   begin
     if bDocumentSymbols then
@@ -2035,6 +2071,61 @@ begin
   begin
     ErrorCode := LJson['error'].AsObject.I['code'];
     ErrorMessage := LJson['error'].AsObject.S['message'];
+  end;
+end;
+
+function JsonFindReferencesResponseToObject(const LJson: ISuperObject; var ErrorCode: Integer; var ErrorMessage: string;
+    const path: string = ''): TLSPFindReferencesResponse;
+var
+  LArray: ISuperArray;
+  s: string;
+  i: Integer;
+
+  procedure ReadLocation(var item: TLSPLocation; const supObj: ISuperObject);
+  begin
+    item.uri := supObj.S['uri'];
+
+    // Range
+    if supObj.Expression['range'].DataType = dtObject then
+    begin
+      item.range.startPos.line := supObj.O['range'].O['start'].I['line'];
+      item.range.startPos.character := supObj.O['range'].O['start'].I['character'];
+      item.range.endPos.line := supObj.O['range'].O['end'].I['line'];
+      item.range.endPos.character := supObj.O['range'].O['end'].I['character'];
+    end;
+  end;
+
+begin
+  Result := TLSPFindReferencesResponse.Create;
+  ErrorCode := 0;
+  ErrorMessage := '';
+
+  if path <> '' then
+    s := path
+  else if LJson['result'].DataType <> dtNil then
+    s := 'result'
+  else
+    s := 'partial result';
+
+  // Check for errors
+  if (LJson['error'].DataType = dtObject) and (LJson['error'].AsObject.S['message'] <> '') then
+  begin
+    ErrorCode := LJson['error'].AsObject.I['code'];
+    ErrorMessage := LJson['error'].AsObject.S['message'];
+  end;
+
+  // The response can be null or TArray<TLSPLocation>
+  if (LJson[s].DataType = dtArray) then
+  begin
+    // TArray<TLSPLocation>
+    LArray := LJson[s].AsArray;
+    if LArray.Length = 0 then Exit;
+    if LArray.O[0].S['uri'] <> '' then
+    begin
+      SetLength(Result.locations, LArray.Length);
+      for i := 0 to LArray.Length - 1 do
+        ReadLocation(Result.locations[i], LArray.O[i]);
+    end;
   end;
 end;
 
@@ -3282,6 +3373,11 @@ begin
       Result := JsonMonikerToObject(LJson, n, s, 'params.value');
       Exit;
     end;
+    lspReferences:
+    begin
+      Result := JsonFindReferencesResponseToObject(LJson, n, s, 'params.value');
+      Exit;
+    end;
     lspSelectionRange:
     begin
       Result := JsonSelectionRangeResponseToObject(LJson, n, s, 'params.value');
@@ -4218,6 +4314,8 @@ var
   i,k: Integer;
   params: TLSPTextDocumentEdit;
   edit: TLSPAnnotatedTextEdit;
+  LEdit: TLSPTextEdit;
+  LChange: TLSPEditChanges;
 begin
   Result := nil;
   ErrorCode := 0;
@@ -4240,30 +4338,41 @@ begin
   if LJson[s].AsObject.Expression['changes'].DataType = dtObject then
   begin
     LObject := LJson[s].AsObject.O['changes'];
-    Result.changes.uri := LObject.S['uri'];
-    if LObject.Expression['values'].DataType = dtArray then
+    LObject.First;
+    for k := 1 to LObject.Count do
     begin
-      LArray := LObject.A['values'];
-      SetLength(Result.changes.values, LArray.Length);
-      i := 0;
-      for LMember in LArray do
+      if LObject.CurrentValue.DataType = dtArray then
       begin
-        if LMember.DataType <> dtObject then Continue;
-        LArrayObj := LMember.AsObject;
+        LChange := TLSPEditChanges.Create;
+        LChange.uri := LObject.CurrentKey;
 
-        Result.changes.values[i].newText := LArrayObj.S['newText'];
-        if LArrayObj.Expression['range'].DataType = dtObject then
+        LArray := TCast.Create(LObject.CurrentValue).AsArray;
+        SetLength(LChange.values, LArray.Length);
+        i := 0;
+        for LMember in LArray do
         begin
-          LRange := LArrayObj.O['range'];
-          Result.changes.values[i].range.startPos.line := LRange.O['start'].I['line'];
-          Result.changes.values[i].range.startPos.character := LRange.O['start'].I['character'];
-          Result.changes.values[i].range.endPos.line := LRange.O['end'].I['line'];
-          Result.changes.values[i].range.endPos.character := LRange.O['end'].I['character'];
+          if LMember.DataType <> dtObject then Continue;
+          LArrayObj := LMember.AsObject;
+
+          LEdit := TLSPTextEdit.Create;
+          LEdit.newText := LArrayObj.S['newText'];
+          if LArrayObj.Expression['range'].DataType = dtObject then
+          begin
+            LRange := LArrayObj.O['range'];
+            LEdit.range.startPos.line := LRange.O['start'].I['line'];
+            LEdit.range.startPos.character := LRange.O['start'].I['character'];
+            LEdit.range.endPos.line := LRange.O['end'].I['line'];
+            LEdit.range.endPos.character := LRange.O['end'].I['character'];
+          end;
+          LChange.values[i] := LEdit;
+          Inc(i);
         end;
-        Inc(i);
+        if i <> Length(LChange.values) then
+          SetLength(LChange.values, i);
+
+        Result.changes.Add(LChange);
       end;
-      if i <> Length(Result.changes.values) then
-        SetLength(Result.changes.values, i);
+      LObject.Next;
     end;
   end;
 
@@ -4822,6 +4931,8 @@ var
   i,j: Integer;
   params: TLSPBaseParams;
   edit: TLSPAnnotatedTextEdit;
+  LEdit: TLSPTextEdit;
+  LChange: TLSPEditChanges;
 begin
   Result := nil;
   ErrorCode := 0;
@@ -4966,12 +5077,14 @@ begin
       LObject := LJson[s].AsObject;
       LObject.First;
       sn := LObject.CurrentKey;
-      Result.edit.changes.uri := sn;
 
-      if LObject.Expression[sn].DataType = dtArray then
+      LChange := TLSPEditChanges.Create;
+      LChange.uri := sn;
+
+      if LObject.CurrentValue.DataType = dtArray then
       begin
-        LArray := LObject.A[sn];
-        SetLength(Result.edit.changes.values,LArray.Length);
+        LArray := TCast.Create(LObject.CurrentValue).AsArray;
+        SetLength(LChange.values,LArray.Length);
 
         // Retrieve edit's
         i := 0;
@@ -4979,22 +5092,26 @@ begin
         begin
           if LMember.DataType <> dtObject then Continue;
           LArrayObj := LMember.AsObject;
-          Result.edit.changes.values[i].newText := LArrayObj.S['newText'];
+
+          LEdit := TLSPTextEdit.Create;
+          LEdit.newText := LArrayObj.S['newText'];
 
           // range
           if LArrayObj.Expression['range'].DataType = dtObject then
           begin
             LRange := LArrayObj.O['range'];
-            Result.edit.changes.values[i].range.startPos.line := LRange.O['startPos'].I['line'];
-            Result.edit.changes.values[i].range.startPos.character := LRange.O['startPos'].I['character'];
-            Result.edit.changes.values[i].range.endPos.line := LRange.O['endPos'].I['line'];
-            Result.edit.changes.values[i].range.endPos.character := LRange.O['endPos'].I['character'];
+            LEdit.range.startPos.line := LRange.O['start'].I['line'];
+            LEdit.range.startPos.character := LRange.O['start'].I['character'];
+            LEdit.range.endPos.line := LRange.O['end'].I['line'];
+            LEdit.range.endPos.character := LRange.O['end'].I['character'];
           end;
+          LChange.values[i] := LEdit;
           Inc(i);
         end;
-        if i <> Length(Result.edit.changes.values) then
-          SetLength(Result.edit.changes.values, i);
+        if i <> Length(LChange.values) then
+          SetLength(LChange.values, i);
       end;
+      Result.edit.changes.Add(LChange);
     end;
   end;
 
@@ -5163,13 +5280,14 @@ begin
     lspWorkDoneProgress:              Result := TLSPWorkDoneProgressParams(lspMsg.paramObj).AsJSON;
     lspDidChangeWorkspaceFolders:     Result := TLSPDidChangeWorkspaceFoldersParams(lspMsg.paramObj).AsJSON;
     lspWorkspaceApplyEdit:            Result := TLSPApplyWorkspaceEditParams(lspMsg.paramObj).AsJSON;
-    lspWorkspaceExecuteCommand:       Result := TLSPExecuteCommandParams(lspMsg.paramObj).AsJSON;
+    lspWorkspaceExecuteCommand:       Result := LSPExecuteCommandParamsToJSON(TLSPExecuteCommandParams(lspMsg.paramObj));
     lspWorkspaceWillCreateFiles:      Result := TLSPCreateFilesParams(lspMsg.paramObj).AsJSON;
     lspWorkspaceWillDeleteFiles:      Result := TLSPDeleteFilesParams(lspMsg.paramObj).AsJSON;
     lspWorkspaceWillRenameFiles:      Result := TLSPRenameFilesParams(lspMsg.paramObj).AsJSON;
     lspWorkspaceDidCreateFiles:       Result := TLSPCreateFilesParams(lspMsg.paramObj).AsJSON;
     lspWorkspaceDidDeleteFiles:       Result := TLSPDeleteFilesParams(lspMsg.paramObj).AsJSON;
     lspWorkspaceDidRenameFiles:       Result := TLSPRenameFilesParams(lspMsg.paramObj).AsJSON;
+    lspWorkspaceSymbol:               Result := TLSPWorkspaceSymbolParams(lspMsg.paramObj).AsJSON;
     lspDidOpenTextDocument:           Result := TLSPDidOpenTextDocumentParams(lspMsg.paramObj).AsJSON;
     lspDidChangeTextDocument:         Result := TLSPDidChangeTextDocumentParams(lspMsg.paramObj).AsJSON;
     lspWillSaveTextDocument:          Result := TLSPWillSaveTextDocumentParams(lspMsg.paramObj).AsJSON;
@@ -5185,7 +5303,7 @@ begin
     lspGotoDefinition:                Result := TLSPDefinitionParams(lspMsg.paramObj).AsJSON;
     lspGotoTypeDefinition:            Result := TLSPTypeDefinitionParams(lspMsg.paramObj).AsJSON;
     lspGotoImplementation:            Result := TLSPImplmentationParams(lspMsg.paramObj).AsJSON;
-    lspReferences:                    Result := '';
+    lspReferences:                    Result := TLSPReferencesParams(lspMsg.paramObj).AsJSON;
     lspDocumentHighlight:             Result := TLSPDocumentHighlightParams(lspMsg.paramObj).AsJSON;
     lspDocumentSymbol:                Result := TLSPDocumentSymbolParams(lspMsg.paramObj).AsJSON;
     lspCodeAction:                    Result := TLSPCodeActionParams(lspMsg.paramObj).AsJSON;
@@ -5203,7 +5321,7 @@ begin
     lspPrepareRename:                 Result := TLSPPrepareRenameParams(lspMsg.paramObj).AsJSON;
     lspFoldingRange:                  Result := TLSPFoldingRangeParams(lspMsg.paramObj).AsJSON;
     lspSelectionRange:                Result := TLSPSelectionRangeParams(lspMsg.paramObj).AsJSON;
-    lspPrepareCallHierarchy:          Result := '';
+    lspPrepareCallHierarchy:          Result := TLSPCallHierarchyPrepareParams(lspMsg.paramObj).AsJSON;
     lspCallHierarchyIncommingCalls:   Result := TLSPCallHierarchyIncomingCallsParams(lspMsg.paramObj).AsJSON;
     lspCallHierarchyOutgoingCalls:    Result := TLSPCallHierarchyOutgoingCallsParams(lspMsg.paramObj).AsJSON;
     lspSemanticTokensFull:            Result := TLSPSemanticTokensParams(lspMsg.paramObj).AsJSON;
